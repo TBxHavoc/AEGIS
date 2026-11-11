@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# AEGIS local runtime data
+data/*.db
+data/*.sqlite*
+data/*.log
+data/voice_preferences.json
+models/*
+!models/.gitkeep
