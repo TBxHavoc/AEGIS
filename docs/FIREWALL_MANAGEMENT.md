@@ -1,0 +1,7 @@
+# Firewall management
+
+`GET /api/security/firewall` reads UFW status/rules when the executable exists and reports TCP listeners from `/proc/net/{tcp,tcp6}`. If UFW is unavailable or denies access, the result says so; it does not infer that the firewall is active. Listener discovery does not map sockets reliably to owning processes and is not a complete exposure audit.
+
+`POST /api/security/firewall/proposals` accepts a port, `tcp`/`udp`, and optional source CIDR. It rejects invalid ports/protocols and SSH port 22, and returns an additive UFW allow command with an impact explanation. This only prepares an in-memory proposal. `POST /api/security/firewall/apply` is separate and requires the proposal ID, `confirmed: true`, local access, and the configured bearer token. It runs only the additive `ufw allow` command, then reads status/rules again. It never flushes rules, disables UFW, edits DNS/routing, changes interfaces, or removes an existing rule. The OS may reject application if AEGIS lacks privileges; no elevation is attempted.
+
+Applying a proposal changes the host firewall and can expose a service. Review the source CIDR, port, service owner, and impact before explicit approval. Recovery: inspect `sudo ufw status numbered` and remove only the newly added numbered rule using the administrator's normal UFW procedure. AEGIS currently does not automate rollback. Firewall status in this environment was read-only inspected; UFW returned “You need to be root”, so the active state and rules are unverified. No rule was changed.

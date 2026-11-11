@@ -1,0 +1,3 @@
+# Scheduler
+
+`TaskScheduler` supports a finite registry of named workflows, SQLite persistence, execution history, one-time and recurring schedules, bounded retries, pause/resume/cancel, and graceful shutdown. Persisted tasks restore paused and must be explicitly approved again before resume. Scheduling is loopback-only and requires `confirmed: true`. The registered `system.status.snapshot` workflow resolves active protocols and calls the read-only diagnostics tool through `ToolRegistry`; the scheduler cannot accept arbitrary Python handlers over HTTP. See the `GET/POST /api/scheduler/tasks` routes.

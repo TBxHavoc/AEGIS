@@ -1,0 +1,2 @@
+# Optional local GGUF inference runtime. Not installed by the base application.
+llama-cpp-python>=0.3.36,<0.4

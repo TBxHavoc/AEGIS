@@ -1,0 +1,294 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>AEGIS</title>
+
+<style>
+:root {
+  color-scheme: dark;
+  --glow: #dff7ff;
+  --background: #000;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--background);
+}
+
+body {
+  display: grid;
+  place-items: center;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+#stage {
+  position: relative;
+  width: min(94vmin, 850px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+
+#visualizer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+#core {
+  position: relative;
+  width: 56%;
+  aspect-ratio: 1;
+  border: 2px solid rgba(224, 248, 255, .96);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #000;
+  box-shadow:
+    0 0 8px rgba(203, 242, 255, .75),
+    0 0 25px rgba(150, 224, 255, .17),
+    inset 0 0 24px rgba(150, 224, 255, .035);
+  animation: core-breathe 4s ease-in-out infinite;
+}
+
+#name {
+  color: #effbff;
+  font-size: clamp(22px, 7vmin, 64px);
+  font-weight: 300;
+  letter-spacing: .19em;
+  padding-left: .19em;
+  text-shadow:
+    0 0 5px rgba(225, 248, 255, .85),
+    0 0 22px rgba(175, 232, 255, .25);
+  user-select: none;
+}
+
+@keyframes core-breathe {
+  0%, 100% {
+    box-shadow:
+      0 0 8px rgba(203, 242, 255, .65),
+      0 0 22px rgba(150, 224, 255, .12),
+      inset 0 0 24px rgba(150, 224, 255, .025);
+  }
+  50% {
+    box-shadow:
+      0 0 12px rgba(203, 242, 255, .9),
+      0 0 32px rgba(150, 224, 255, .22),
+      inset 0 0 30px rgba(150, 224, 255, .05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #core { animation: none; }
+}
+</style>
+</head>
+
+<body>
+<main id="stage" aria-label="AEGIS voice visualizer">
+  <canvas id="visualizer" aria-hidden="true"></canvas>
+  <div id="core">
+    <div id="name">AEGIS</div>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.getElementById("visualizer");
+  const ctx = canvas.getContext("2d", { alpha: true });
+  const bars = 144;
+  const levels = new Float32Array(bars);
+
+  let width = 0;
+  let height = 0;
+  let pixelRatio = 1;
+  let speaking = false;
+  let audioAnalyser = null;
+  let audioData = null;
+  let animationFrame = 0;
+  let reconnectTimer = null;
+  let socket = null;
+  let manuallyClosed = false;
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    width = rect.width;
+    height = rect.height;
+
+    canvas.width = Math.round(width * pixelRatio);
+    canvas.height = Math.round(height * pixelRatio);
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  }
+
+  function setSpeaking(value) {
+    speaking = Boolean(value);
+  }
+
+  function setAudioAnalyser(analyser) {
+    audioAnalyser = analyser || null;
+    audioData = null;
+
+    if (audioAnalyser) {
+      audioAnalyser.fftSize = 512;
+      audioData = new Uint8Array(audioAnalyser.frequencyBinCount);
+    }
+  }
+
+  // Keep the hooks available for future integrations.
+  window.aegisSetSpeaking = setSpeaking;
+  window.aegisSetAudioAnalyser = setAudioAnalyser;
+
+  // Connect to the Python bridge running on this computer.
+  function connectBridge() {
+    if (manuallyClosed) return;
+
+    try {
+      socket = new WebSocket("ws://127.0.0.1:8765");
+
+      socket.addEventListener("open", () => {
+        console.info("[AEGIS] Visualizer bridge connected.");
+      });
+
+      socket.addEventListener("message", (event) => {
+        try {
+          const state = JSON.parse(event.data);
+
+          if (typeof state.speaking === "boolean") {
+            setSpeaking(state.speaking);
+          }
+        } catch (error) {
+          console.warn("[AEGIS] Invalid bridge message.", error);
+        }
+      });
+
+      socket.addEventListener("error", () => {
+        // The close event handles reconnection.
+        console.info("[AEGIS] Bridge connection unavailable.");
+      });
+
+      socket.addEventListener("close", () => {
+        setSpeaking(false);
+
+        if (!manuallyClosed && reconnectTimer === null) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connectBridge();
+          }, 2000);
+        }
+      });
+    } catch (error) {
+      console.warn("[AEGIS] Could not connect to bridge.", error);
+
+      if (!manuallyClosed && reconnectTimer === null) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connectBridge();
+        }, 2000);
+      }
+    }
+  }
+
+  function levelFor(index, time) {
+    const idle =
+      0.035 +
+      0.025 * (
+        0.5 + 0.5 * Math.sin(time * 0.0017 + index * 0.21)
+      );
+
+    let target = idle;
+
+    if (audioAnalyser && audioData) {
+      audioAnalyser.getByteFrequencyData(audioData);
+
+      const bin = Math.floor(
+        (index / bars) * audioData.length * 0.72
+      );
+
+      target = 0.025 + (audioData[bin] / 255) * 0.8;
+    } else if (speaking) {
+      // Animated response to Python's speaking signal.
+      const wave =
+        Math.sin(time * 0.012 + index * 0.39) *
+        Math.sin(time * 0.004 - index * 0.13);
+
+      target = 0.10 + Math.abs(wave) * 0.55;
+    }
+
+    levels[index] += (target - levels[index]) * 0.22;
+    return levels[index];
+  }
+
+  function draw(time) {
+    ctx.clearRect(0, 0, width, height);
+
+    const cx = width / 2;
+    const cy = height / 2;
+    const radius = width * 0.295;
+    const baseLength = width * 0.012;
+    const maxLength = width * 0.105;
+
+    ctx.lineCap = "round";
+
+    for (let i = 0; i < bars; i++) {
+      const angle = (i / bars) * Math.PI * 2;
+      const level = levelFor(i, time);
+      const length = baseLength + level * maxLength;
+      const innerRadius = radius + width * 0.012;
+      const outerRadius = innerRadius + length;
+
+      ctx.beginPath();
+      ctx.moveTo(
+        cx + Math.cos(angle) * innerRadius,
+        cy + Math.sin(angle) * innerRadius
+      );
+      ctx.lineTo(
+        cx + Math.cos(angle) * outerRadius,
+        cy + Math.sin(angle) * outerRadius
+      );
+
+      ctx.lineWidth = i % 12 === 0 ? 2.1 : 1.35;
+      ctx.strokeStyle = `rgba(225, 248, 255, ${0.63 + level * 0.37})`;
+      ctx.shadowBlur = speaking ? 7 : 4;
+      ctx.shadowColor = "rgba(180, 232, 255, 0.8)";
+      ctx.stroke();
+    }
+
+    ctx.shadowBlur = 0;
+    animationFrame = requestAnimationFrame(draw);
+  }
+
+  window.addEventListener("resize", resize);
+
+  window.addEventListener("pagehide", () => {
+    manuallyClosed = true;
+    cancelAnimationFrame(animationFrame);
+
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    if (socket) socket.close();
+  });
+
+  resize();
+  connectBridge();
+  animationFrame = requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

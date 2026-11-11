@@ -1,0 +1,7 @@
+# MCP integration
+
+AEGIS includes an opt-in MCP Streamable HTTP JSON client at `backend/integrations/mcp.py`. Configure `AEGIS_MCP_ENDPOINT`, a safe `AEGIS_MCP_SERVER_ID`, and `AEGIS_MCP_APPROVED=1`. Optional bearer credentials are read from the environment variable named by `AEGIS_MCP_BEARER_ENV`; the credential value is not stored or returned.
+
+The client does not connect at startup. A loopback user must call `POST /api/mcp/connect` with `{"confirmed":true}`. The client initializes, validates the negotiated protocol version, discovers at most 100 tools, validates bounded object schemas, and registers namespaced tools in the existing `ToolRegistry`. Discovery does not grant tool permission. Review `GET /api/tools`, then call `POST /api/mcp/approve-tools` with the exact discovered `tool_ids` and `confirmed:true` to add those names to the runtime allowlist. MCP calls require network policy, explicit per-call confirmation, schema checks, bounded results, and ordinary audit records. Disconnect with `POST /api/mcp/disconnect`; `GET /api/mcp/status` reports state. Disconnect revokes runtime approvals.
+
+Current transport support is JSON request/response over HTTP(S), not stdio or SSE streaming. Cleartext HTTP is restricted to loopback. HTTPS endpoints are explicitly configured and locally approved; external hosts are not discovered automatically. Remote tool results are untrusted data. The server's tool allowlist and network permission remain required, so MCP cannot grant its tools access by itself.
